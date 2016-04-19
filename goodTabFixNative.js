@@ -5,20 +5,25 @@
  * Date: 16/1/15
  * Time: 下午5:49
  */
-(function(root, factory){
-    // AMD
+(function (root, factory) {
     if (typeof define === 'function' && define.amd) {
-        define(['exports'], function(exports) {
-            exports.GoodTab = factory(root);
+        // AMD. Register as an anonymous module.
+        define([], function () {
+            return factory();
         });
-    }
-    // Node.js or CommonJS
-    else if (typeof exports !== 'undefined') {
-        exports.GoodTab = factory(root);
-    }
-    // Global
-    else {
-        root.GoodTab = factory(root);
+    } else if (typeof define === 'function') {
+        // CMD.
+        define(function (require, exports, module) {
+            return factory();
+        });
+    } else if (typeof module === 'object' && module.exports) {
+        // Node. Does not work with strict CommonJS, but
+        // only CommonJS-like enviroments that support module.exports,
+        // like Node.
+        module.exports = factory();
+    } else {
+        // Browser globals
+        root.GoodTab = factory();
     }
 }(this, function (root, undefined) {
     var class2type = {}, key;
@@ -73,35 +78,41 @@
         var me = this;
         var options = extend(this.defaultOptions, userOption, 1);
 
-        var containerElm = document.getElementById(selector),
+        var containerElm = selector instanceof Element ? selector : document.getElementById(selector),
             headerElm = containerElm.getElementsByClassName('good-tab-header')[0],
             bodyElm = containerElm.getElementsByClassName('good-tab-body')[0],
             navBarElm = document.createElement('div'),
-            slideElm = document.createElement('div'),
-            navLiElms = headerElm.getElementsByTagName('li');
+            slideElm = document.createElement('div');
+
+
+        var hasHeader = !!headerElm;
 
         var ctaWidth = containerElm.offsetWidth,
-            ctaHeight = containerElm.offsetHeight,
-            headerHeight = headerElm.offsetHeight;
+            ctaHeight = containerElm.offsetHeight;
 
         // 当前所在索引
-        var itemIndex = 0;
+        var itemIndex = 0, oldItemIndex = 0;
         var itemLength = 0;
 
+        if (hasHeader) {
+            var navLiElms = headerElm.getElementsByTagName('li');
+            var headerHeight = headerElm.offsetHeight;
 
-        headerElm.style.position = 'relative';
-        navBarElm.className = options.navBarClass;
-        extend(navBarElm.style, options.navBarStyle);
-        headerElm.insertBefore(navBarElm, headerElm.firstChild);
+            headerElm.style.position = 'relative';
+            navBarElm.className = options.navBarClass;
+            extend(navBarElm.style, options.navBarStyle);
+            headerElm.insertBefore(navBarElm, headerElm.firstChild);
+        }
 
-        navBarScroll(0);
+
+        hasHeader && navBarScroll(0);
 
         // 重新包装滚动内容
         extend(bodyElm.style, {
             'width': '100%',
             'overflow': 'hidden',
             'position': 'relative',
-            'height': ctaHeight - headerHeight + 'px'
+            'height': ctaHeight - (headerHeight || 0) + 'px'
         });
 
         slideElm.className = 'slide';
@@ -124,9 +135,29 @@
             asideItem.style.position = 'absolute';
             asideItem.style.top = '0';
             asideItem.style.left = '0';
-            asideItem.innerHTML =
-                '<div class="container" style="position:relative; z-index:1; height: 100%; ' + (options.showScrollBar ? '' : 'width:' + (ctaWidth + 40) + 'px;') + ' overflow-y: scroll; overflow-x: hidden;">' +
-                '  <div style="position: relative;">' +
+            var itemContainer = document.createElement('div');
+            itemContainer.className = 'container';
+            itemContainer.style.position = 'relative';
+            itemContainer.style.zIndex = 1;
+            itemContainer.style.height = '100%';
+            if (!options.showScrollBar) {
+                itemContainer.width = (ctaWidth + 40) + 'px';
+            }
+            itemContainer.style.overflowX = 'hidden';
+            itemContainer.style.overflowY = 'scroll';
+
+            var loading = {isLoading: false};
+            itemContainer.onscroll = function (i, e) {
+                var currentElm = e.currentTarget,
+                    scrollTop = currentElm.scrollTop,
+                    scrollHeight = currentElm.scrollHeight,
+                    offsetHeight = currentElm.offsetHeight;
+                if(scrollHeight - offsetHeight - scrollTop <= options.autoLoadPosition && !loading.isLoading){
+                    options.autoLoad(i, loading);
+                }
+            }.bind(this, i);
+            itemContainer.innerHTML =
+                '<div style="position: relative;">' +
                 '    <div style="overflow: hidden; height: ' + (options.pullStyle == 'spring' ? 0 : options.pullMax) + 'px;position: absolute;top:0;width: ' + ctaWidth + 'px" class="pull-fresh">' +
                 '        <div style="position: absolute; top: 0; bottom:0;left: 0; right:0;display: -webkit-box; -webkit-box-align: center;-webkit-box-orient: vertical; -webkit-box-pack: center;">' +
                 '            ' + options.pullHtml + '' +
@@ -138,9 +169,9 @@
                 '            ' + options.pushHtml + '' +
                 '        </div>' +
                 '    </div>' +
-                '  </div>' +
-
                 '</div>';
+            asideItem.innerHTML = '';
+            asideItem.appendChild(itemContainer);
             slideElm.appendChild(asideItem);
         }
 
@@ -159,7 +190,7 @@
         /**
          * 点击导航
          */
-        headerElm.addEventListener('click', function (e) {
+        hasHeader && headerElm.addEventListener('click', function (e) {
             var navLiElms = headerElm.getElementsByTagName('li');
             var index = -1;
             for (var i = 0, len = navLiElms.length; i < len; i++) {
@@ -177,7 +208,7 @@
         }, false);
 
         bodyElm.addEventListener('touchstart', function (e) {
-            bodyElm.removeEventListener('touchmove');
+            bodyElm.removeEventListener('touchmove', moveHandle);
             // 如果到下拉或上拉的最大值后取消事件，等待加载
             if (!pullAble || !pushAble) {
                 return;
@@ -215,7 +246,7 @@
 
                             if (nextItemIndex >= 0 && nextItemIndex < itemLength) {
                                 var targetLeft = itemIndex * ctaWidth + subX;
-                                navBarScroll(nextItemIndex, subX);
+                                hasHeader && navBarScroll(nextItemIndex, subX);
                                 setTranslate3dX(slideElm, targetLeft);
                             }
                         }
@@ -230,7 +261,7 @@
                         }
                         // 到底部操作
                         else if (subY < 0 && isBottom) {
-                            if (options.ablePushLoad || options.ableAutoLoad) {
+                            if (options.ablePushLoad) {
                                 me.pushHandle(e, content.children[0].lastElementChild, subY);
                             }
                         }
@@ -252,7 +283,7 @@
                         e.preventDefault();
                     }
                     else {
-                        bodyElm.removeEventListener('touchmove');
+                        bodyElm.removeEventListener('touchmove', moveHandle);
                     }
                 }
             }
@@ -260,16 +291,17 @@
 
         bodyElm.addEventListener('touchend', function (e) {
             var swipe = getSwipe();
+            var index;
             switch (swipe.type) {
                 case 'LeftToRight':
-                    changeItem(itemIndex == 0 || swipe.value < options.minLtR ? 0 : ++itemIndex);
-                    navBarScroll(itemIndex);
-                    changeNav(itemIndex);
+                    index = itemIndex == 0 || swipe.value < options.minLtR ? 0 : ++itemIndex;
+                    changeItem(index);
+                    hasHeader && navBarScroll(index);
                     break;
                 case 'RightToLeft':
-                    changeItem(Math.abs(itemIndex) == itemLength - 1 || swipe.value < options.minLtR ? itemLength - 1 : --itemIndex);
-                    navBarScroll(itemIndex);
-                    changeNav(itemIndex);
+                    index = Math.abs(itemIndex) == itemLength - 1 || swipe.value < options.minLtR ? itemLength - 1 : --itemIndex;
+                    changeItem(index);
+                    hasHeader && navBarScroll(index);
                     break;
                 case 'UpToDown':
                     // 如果下拉中途松手
@@ -491,19 +523,18 @@
                     'transition': 'none'
                 }, 1);
             }, options.changeSpeed);
+            options.tabChange(Math.abs(toIndex));
         }
 
         /**
          * 切换标签
          */
         function changeNav(toIndex) {
+            var index = Math.abs(toIndex);
             for (var i = 0, len = navLiElms.length; i < len; i++) {
-                if (i == Math.abs(toIndex)) {
-                    navLiElms[i].classList.add('on');
-                } else {
-                    navLiElms[i].classList.remove('on');
-                }
+                navLiElms[i].className = '';
             }
+            navLiElms[index].className = 'on';
         }
 
         /**
@@ -523,13 +554,7 @@
          */
         function navBarScroll(newIndex, subX) {
             newIndex = Math.abs(newIndex);
-            var oldIndex = -1;
-            for (var i = 0, len = navLiElms.length; i < len; i++) {
-                if (navLiElms[i].classList.contains('on')) {
-                    oldIndex = i;
-                    break;
-                }
-            }
+            var oldIndex = Math.abs(itemIndex);
             var newNavInfo = getNavInfo(newIndex);
 
 
@@ -547,6 +572,7 @@
                 navBarElm.style.left = left + 'px';
                 navBarElm.style.width = width + 'px';
             } else {
+                changeNav(newIndex);
                 extend(navBarElm.style, {
                     '-webkit-transition': 'all ' + (options.changeSpeed / 1000) + 's ease',
                     'transition': 'all ' + (options.changeSpeed / 1000) + 's ease',
@@ -662,6 +688,12 @@
         },
         // 下滑到顶部时触发
         pullToTop: function (itemIndex) {
+        },
+        // 切换内容触发
+        tabChange: function (toIndex) {
+        },
+        // 自动加载
+        autoLoad: function(itemIndex, loading){
         }
     };
 
